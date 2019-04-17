@@ -23,6 +23,8 @@
  */
 
 namespace Handlebars;
+use Handlebars\Arguments;
+use Traversable;
 
 /**
  * Handlebars base template
@@ -31,6 +33,7 @@ namespace Handlebars;
  * @category  Xamin
  * @package   Handlebars
  * @author    fzerorubigd <fzerorubigd@gmail.com>
+ * @author    Pascal Thormeier <pascal.thormeier@gmail.com>
  * @copyright 2010-2012 (c) Justin Hileman
  * @copyright 2012 (c) ParsPooyesh Co
  * @license   MIT <http://opensource.org/licenses/MIT>
@@ -41,6 +44,8 @@ namespace Handlebars;
 class Template
 {
     /**
+     * Handlebars instance
+     *
      * @var Handlebars
      */
     protected $handlebars;
@@ -56,9 +61,11 @@ class Template
     protected $source = '';
 
     /**
+     * Run stack
+     *
      * @var array Run stack
      */
-    private $_stack = array();
+    protected $stack = array();
 
     /**
      * Handlebars template constructor
@@ -72,7 +79,7 @@ class Template
         $this->handlebars = $engine;
         $this->tree = $tree;
         $this->source = $source;
-        array_push($this->_stack, array(0, $this->getTree(), false));
+        array_push($this->stack, array(0, $this->getTree(), false));
     }
 
     /**
@@ -106,29 +113,27 @@ class Template
     }
 
     /**
-     * set stop token for render and discard method
+     * Set stop token for render and discard method
      *
      * @param string $token token to set as stop token or false to remove
      *
      * @return void
      */
-
     public function setStopToken($token)
     {
-        $topStack = array_pop($this->_stack);
+        $topStack = array_pop($this->stack);
         $topStack[2] = $token;
-        array_push($this->_stack, $topStack);
+        array_push($this->stack, $topStack);
     }
 
     /**
-     * get current stop token
+     * Get current stop token
      *
      * @return string|bool
      */
-
     public function getStopToken()
     {
-        $topStack = end($this->_stack);
+        $topStack = end($this->stack);
 
         return $topStack[2];
     }
@@ -140,7 +145,7 @@ class Template
      */
     public function getCurrentTokenTree()
     {
-        $topStack = end($this->_stack);
+        $topStack = end($this->stack);
 
         return $topStack[1];
     }
@@ -158,7 +163,7 @@ class Template
         if (!$context instanceof Context) {
             $context = new Context($context);
         }
-        $topTree = end($this->_stack); // never pop a value from stack
+        $topTree = end($this->stack); // never pop a value from stack
         list($index, $tree, $stop) = $topTree;
 
         $buffer = '';
@@ -173,33 +178,42 @@ class Template
             ) {
                 break;
             }
-            if (isset($current[Tokenizer::TRIM_LEFT]) && $current[Tokenizer::TRIM_LEFT]) {
+            if (isset($current[Tokenizer::TRIM_LEFT]) 
+                && $current[Tokenizer::TRIM_LEFT]
+            ) {
                 $buffer = rtrim($buffer);
             }
 
-            $tmp = $this->_renderInternal($current, $context);
+            $tmp = $this->renderInternal($current, $context);
 
-            if (isset($current[Tokenizer::TRIM_LEFT]) && $current[Tokenizer::TRIM_LEFT]) {
+            if (isset($current[Tokenizer::TRIM_LEFT]) 
+                && $current[Tokenizer::TRIM_LEFT]
+            ) {
                 $tmp = rtrim($tmp);
             }
 
-            if ($rTrim  || (isset($current[Tokenizer::TRIM_RIGHT]) && $current[Tokenizer::TRIM_RIGHT])) {
+            if ($rTrim  
+                || (isset($current[Tokenizer::TRIM_RIGHT]) 
+                && $current[Tokenizer::TRIM_RIGHT])
+            ) {
                 $tmp = ltrim($tmp);
             }
 
             $buffer .= $tmp;
-            // Some time, there is more than one string token (first is empty),
+            // Some time, there is more than 
+            //one string token (first is empty),
             //so we need to trim all of them in one shot
 
             $rTrim = (empty($tmp) && $rTrim) ||
-                isset($current[Tokenizer::TRIM_RIGHT]) && $current[Tokenizer::TRIM_RIGHT];
+                isset($current[Tokenizer::TRIM_RIGHT]) 
+                && $current[Tokenizer::TRIM_RIGHT];
         }
         if ($stop) {
             //Ok break here, the helper should be aware of this.
-            $newStack = array_pop($this->_stack);
+            $newStack = array_pop($this->stack);
             $newStack[0] = $index;
             $newStack[2] = false; //No stop token from now on
-            array_push($this->_stack, $newStack);
+            array_push($this->stack, $newStack);
         }
 
         return $buffer;
@@ -213,7 +227,7 @@ class Template
      *
      * @return string
      */
-    private function _renderInternal($current, $context)
+    protected function renderInternal($current, $context)
     {
         $result = '';
         switch ($current[Tokenizer::TYPE]) {
@@ -222,16 +236,16 @@ class Template
         case Tokenizer::T_SECTION :
             $newStack = isset($current[Tokenizer::NODES])
                 ? $current[Tokenizer::NODES] : array();
-            array_push($this->_stack, array(0, $newStack, false));
+            array_push($this->stack, array(0, $newStack, false));
             $result = $this->_section($context, $current);
-            array_pop($this->_stack);
+            array_pop($this->stack);
             break;
         case Tokenizer::T_INVERTED :
             $newStack = isset($current[Tokenizer::NODES]) ?
                 $current[Tokenizer::NODES] : array();
-            array_push($this->_stack, array(0, $newStack, false));
+            array_push($this->stack, array(0, $newStack, false));
             $result = $this->_inverted($context, $current);
-            array_pop($this->_stack);
+            array_pop($this->stack);
             break;
         case Tokenizer::T_COMMENT :
             $result = '';
@@ -269,7 +283,7 @@ class Template
      */
     public function discard()
     {
-        $topTree = end($this->_stack); //This method never pop a value from stack
+        $topTree = end($this->stack); //This method never pop a value from stack
         list($index, $tree, $stop) = $topTree;
         while (array_key_exists($index, $tree)) {
             $current = $tree[$index];
@@ -284,10 +298,10 @@ class Template
         }
         if ($stop) {
             //Ok break here, the helper should be aware of this.
-            $newStack = array_pop($this->_stack);
+            $newStack = array_pop($this->stack);
             $newStack[0] = $index;
             $newStack[2] = false;
-            array_push($this->_stack, $newStack);
+            array_push($this->stack, $newStack);
         }
 
         return '';
@@ -300,9 +314,9 @@ class Template
      */
     public function rewind()
     {
-        $topStack = array_pop($this->_stack);
+        $topStack = array_pop($this->stack);
         $topStack[0] = 0;
-        array_push($this->_stack, $topStack);
+        array_push($this->stack, $topStack);
     }
 
     /**
@@ -329,7 +343,9 @@ class Template
         }
 
         // subexpression parsing loop
-        $subexprs = array(); // will contain all subexpressions inside outermost brackets
+        // will contain all subexpressions 
+        // inside outermost brackets
+        $subexprs = array();
         $insideOf = array( 'single' => false, 'double' => false );
         $lvl = 0;
         $cur_start = 0;
@@ -351,7 +367,11 @@ class Template
             if ($cur == ')' && ! $insideOf['single'] && ! $insideOf['double']) {
                 $lvl--;
                 if ($lvl == 0) {
-                    $subexprs[] = substr($current[Tokenizer::ARGS], $cur_start, $i - $cur_start);
+                    $subexprs[] = substr(
+                        $current[Tokenizer::ARGS], 
+                        $cur_start, 
+                        $i - $cur_start
+                    );
                 }
 
             }
@@ -370,16 +390,32 @@ class Template
                     Tokenizer::INDEX => $current[Tokenizer::INDEX],
                     Tokenizer::ARGS => implode(" ", array_slice($cmd, 1))
                 );
+                
                 // resolve the node recursively
-                $resolved = addcslashes($this->_handlebarsStyleSection($context, $section_node), '"');
+                $resolved = $this->_handlebarsStyleSection(
+                    $context, 
+                    $section_node
+                );
+                
+                $resolved = addcslashes($resolved, '"');
                 // replace original subexpression with result
-                $current[Tokenizer::ARGS] = str_replace('('.$expr.')', '"' . $resolved . '"', $current[Tokenizer::ARGS]);
+                $current[Tokenizer::ARGS] = str_replace(
+                    '('.$expr.')', 
+                    '"' . $resolved . '"', 
+                    $current[Tokenizer::ARGS]
+                );
             }
         }
 
-        $return = $helpers->call($sectionName, $this, $context, $current[Tokenizer::ARGS], $source);
+        $return = $helpers->call(
+            $sectionName, 
+            $this, 
+            $context, 
+            $current[Tokenizer::ARGS], 
+            $source
+        );
 
-        if ($return instanceof String) {
+        if ($return instanceof StringWrapper) {
             return $this->handlebars->loadString($return)->render($context);
         } else {
             return $return;
@@ -402,42 +438,39 @@ class Template
         // fallback to mustache style each/with/for just if there is
         // no argument at all.
         try {
-            $sectionVar = $context->get($sectionName, true);
+            $sectionVar = $context->get($sectionName, false);
         } catch (\InvalidArgumentException $e) {
             throw new \RuntimeException(
-                $sectionName . ' is not registered as a helper'
+                sprintf(
+                    '"%s" is not registered as a helper',
+                    $sectionName
+                )
             );
         }
         $buffer = '';
-        if (is_array($sectionVar) || $sectionVar instanceof \Traversable) {
-            $isList = is_array($sectionVar) &&
-                (array_keys($sectionVar) === range(0, count($sectionVar) - 1));
+        if ($this->_checkIterable($sectionVar)) {
             $index = 0;
-            $lastIndex = $isList ? (count($sectionVar) - 1) : false;
-
+            $lastIndex = (count($sectionVar) - 1);
             foreach ($sectionVar as $key => $d) {
-                $specialVariables = array(
-                    '@index' => $index,
-                    '@first' => ($index === 0),
-                    '@last' => ($index === $lastIndex),
+                $context->pushSpecialVariables(
+                    array(
+                        '@index' => $index,
+                        '@first' => ($index === 0),
+                        '@last' => ($index === $lastIndex),
+                        '@key' => $key
+                    )
                 );
-                if (!$isList) {
-                    $specialVariables['@key'] = $key;
-                }
-                $context->pushSpecialVariables($specialVariables);
                 $context->push($d);
                 $buffer .= $this->render($context);
                 $context->pop();
                 $context->popSpecialVariables();
                 $index++;
             }
-        } elseif (is_object($sectionVar)) {
+        } elseif ($sectionVar) {
             //Act like with
             $context->push($sectionVar);
             $buffer = $this->render($context);
             $context->pop();
-        } elseif ($sectionVar) {
-            $buffer = $this->render($context);
         }
 
         return $buffer;
@@ -462,7 +495,10 @@ class Template
             return $this->_mustacheStyleSection($context, $current);
         } else {
             throw new \RuntimeException(
-                $sectionName . ' is not registered as a helper'
+                sprintf(
+                    '"%s"" is not registered as a helper',
+                    $sectionName
+                )
             );
         }
     }
@@ -500,10 +536,42 @@ class Template
         $partial = $this->handlebars->loadPartial($current[Tokenizer::NAME]);
 
         if ($current[Tokenizer::ARGS]) {
-            $context = $context->get($current[Tokenizer::ARGS]);
+            $arguments = new Arguments($current[Tokenizer::ARGS]);
+
+            $context = new Context($this->_preparePartialArguments($context, $arguments));
         }
 
         return $partial->render($context);
+    }
+
+    /**
+     * Prepare the arguments of a partial to actual array values to be used in a new context
+     *
+     * @param Context   $context   Current context
+     * @param Arguments $arguments Arguments for partial
+     *
+     * @return array
+     */
+    private function _preparePartialArguments(Context $context, Arguments $arguments)
+    {
+        $positionalArgs = array();
+        foreach ($arguments->getPositionalArguments() as $positionalArg) {
+            $contextArg = $context->get($positionalArg);
+            if (is_array($contextArg)) {
+                foreach ($contextArg as $key => $value) {
+                    $positionalArgs[$key] = $value;
+                }
+            } else {
+                $positionalArgs[$positionalArg] = $contextArg;
+            }
+        }
+
+        $namedArguments = array();
+        foreach ($arguments->getNamedArguments() as $key => $value) {
+            $namedArguments[$key] = $context->get($value);
+        }
+
+        return array_merge($positionalArgs, $namedArguments);
     }
 
 
@@ -524,9 +592,9 @@ class Template
     }
 
     /**
-     * get replacing value of a tag
+     * Get replacing value of a tag
      *
-     * will process the tag as section, if a helper with the same name could be
+     * Will process the tag as section, if a helper with the same name could be
      * found, so {{helper arg}} can be used instead of {{#helper arg}}.
      *
      * @param Context $context current context
@@ -589,16 +657,16 @@ class Template
         if (is_array($value)) {
             return 'Array';
         }
-        if ($escaped) {
+        if ($escaped && !($value instanceof SafeString)) {
             $args = $this->handlebars->getEscapeArgs();
-            array_unshift($args, $value);
+            array_unshift($args, (string)$value);
             $value = call_user_func_array(
                 $this->handlebars->getEscape(),
                 array_values($args)
             );
         }
 
-        return $value;
+        return (string)$value;
     }
 
     /**
@@ -638,5 +706,32 @@ class Template
         }
 
         return $args->getPositionalArguments();
+    }
+
+    /**
+     * Tests whether a value should be iterated over (e.g. in a section context).
+     *
+     * @param mixed $value Value to check if iterable.
+     *
+     * @return bool True if the value is 'iterable'
+     *
+     * @see https://github.com/bobthecow/mustache.php/blob/18a2adc/src/Mustache/Template.php#L85-L113
+     */
+    private function _checkIterable($value)
+    {
+        switch (gettype($value)) {
+        case 'object':
+            return $value instanceof Traversable;
+        case 'array':
+            $i = 0;
+            foreach ($value as $k => $v) {
+                if ($k !== $i++) {
+                    return false;
+                }
+            }
+            return true;
+        default:
+            return false;
+        }
     }
 }

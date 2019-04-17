@@ -23,7 +23,7 @@ namespace Handlebars;
 /**
  * Handlebars helpers
  *
- * a collection of helper function. normally a function like
+ * A collection of helper function. normally a function like
  * function ($sender, $name, $arguments) $arguments is unscaped arguments and
  * is a string, not array
  *
@@ -35,10 +35,11 @@ namespace Handlebars;
  * @version   Release: @package_version@
  * @link      http://xamin.ir
  */
-
 class Helpers
 {
     /**
+     * Raw helper array
+     *
      * @var array array of helpers
      */
     protected $helpers = array();
@@ -100,7 +101,10 @@ class Helpers
     {
         if (!is_callable($helper) && ! $helper instanceof Helper) {
             throw new \InvalidArgumentException(
-                "$name Helper is not a callable or doesn't implement the Helper interface."
+                sprintf(
+                    "%s Helper is not a callable or doesn't implement the Helper interface.",
+                    $name
+                )
             );
         }
         $this->helpers[$name] = $helper;
@@ -136,16 +140,28 @@ class Helpers
     public function call($name, Template $template, Context $context, $args, $source)
     {
         if (!$this->has($name)) {
-            throw new \InvalidArgumentException('Unknown helper: ' . $name);
-        }
-
-        if ($this->helpers[$name] instanceof Helper) {
-            return $this->helpers[$name]->execute(
-                $template, $context, $args, $source
+            throw new \InvalidArgumentException(
+                sprintf(
+                    'Unknown helper: "%s"',
+                    $name
+                )
             );
         }
 
-        return call_user_func($this->helpers[$name], $template, $context, $args, $source);
+        $parsedArgs = new Arguments($args);
+        if ($this->helpers[$name] instanceof Helper) {
+            return $this->helpers[$name]->execute(
+                $template, $context, $parsedArgs, $source
+            );
+        }
+
+        return call_user_func(
+            $this->helpers[$name], 
+            $template, 
+            $context, 
+            $parsedArgs, 
+            $source
+        );
     }
 
     /**
@@ -171,7 +187,12 @@ class Helpers
     public function __get($name)
     {
         if (!$this->has($name)) {
-            throw new \InvalidArgumentException('Unknown helper :' . $name);
+            throw new \InvalidArgumentException(
+                sprintf(
+                    'Unknown helper: "%s"',
+                    $name
+                )
+            );
         }
 
         return $this->helpers[$name];
@@ -183,7 +204,7 @@ class Helpers
      * @param string $name helper name
      *
      * @return boolean
-     * @see Handlebras_Helpers::has
+     * @see    Handlebras_Helpers::has
      */
     public function __isset($name)
     {
@@ -226,7 +247,12 @@ class Helpers
     public function remove($name)
     {
         if (!$this->has($name)) {
-            throw new \InvalidArgumentException('Unknown helper: ' . $name);
+            throw new \InvalidArgumentException(
+                sprintf(
+                    'Unknown helper: "%s"',
+                    $name
+                )
+            );
         }
 
         unset($this->helpers[$name]);

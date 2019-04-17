@@ -118,32 +118,47 @@ class HandlebarsTest extends \PHPUnit_Framework_TestCase
                 '<strong>Test</strong>'
             ),
             array(
-                "\{{data}}", // is equal to \\{{data}}
+                "\\{{data}}", // is equal to \{{data}} in template file
                 array('data' => 'foo'),
                 '{{data}}',
             ),
             array(
-                '\\\\{{data}}',
+                '\\\\{{data}}', // is equal to \\{{data}} in template file
                 array('data' => 'foo'),
-                '\\\\foo'
+                '\\foo' // is equals to \foo in output
             ),
             array(
-                '\\\{{data}}', // is equal to \\\\{{data}} in php
+                '\\\\\\{{data}}', // is equal to \\\{{data}} in template file
                 array('data' => 'foo'),
-                '\\\\foo'
+                '\\\\foo' // is equals to \\foo in output
             ),
             array(
-                '\{{{data}}}',
+                '\\\\\\\\{{data}}', // is equal to \\\\{{data}} in template file
+                array('data' => 'foo'),
+                '\\\\\\foo' // is equals to \\\foo in output
+            ),
+            array(
+                '\{{{data}}}', // is equal to \{{{data}}} in template file
                 array('data' => 'foo'),
                 '{{{data}}}'
             ),
             array(
-                '\pi',
+                '\pi', // is equal to \pi in template
                 array(),
                 '\pi'
             ),
             array(
-                '\\\\\\\\qux',
+                '\\\\foo', // is equal to \\foo in template
+                array(),
+                '\\\\foo'
+            ),
+            array(
+                '\\\\\\bar', // is equal to \\\bar in template
+                array(),
+                '\\\\\\bar'
+            ),
+            array(
+                '\\\\\\\\qux', // is equal to \\\\qux in template file
                 array(),
                 '\\\\\\\\qux'
             ),
@@ -161,7 +176,12 @@ class HandlebarsTest extends \PHPUnit_Framework_TestCase
                 '{{#if first}}The first{{else}}{{#if second}}The second{{/if}}{{/if}}',
                 array('first' => false, 'second' => true),
                 'The second'
-            )
+            ),
+            array(
+                '{{#value}}Hello {{value}}, from {{parent_context}}{{/value}}',
+                array('value' => 'string', 'parent_context' => 'parent string'),
+                'Hello string, from parent string'
+            ),
         );
     }
 
@@ -380,7 +400,7 @@ class HandlebarsTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals('Test helper is called with a b c', $engine->render('{{test2 a b c}}', array()));
 
         $engine->addHelper('renderme', function () {
-            return new \Handlebars\String("{{test}}");
+            return new \Handlebars\StringWrapper("{{test}}");
         });
         $this->assertEquals('Test helper is called', $engine->render('{{#renderme}}', array()));
 
@@ -438,13 +458,213 @@ class HandlebarsTest extends \PHPUnit_Framework_TestCase
         $this->setExpectedException('InvalidArgumentException');
         $engine->getHelpers()->call('invalid', $engine->loadTemplate(''), new \Handlebars\Context(), '', '');
     }
-
-    public function testInvalidHelperMustacheStyle()
+    
+    public function testRegisterHelper()
     {
-        $this->setExpectedException('RuntimeException');
         $loader = new \Handlebars\Loader\StringLoader();
         $engine = new \Handlebars\Handlebars(array('loader' => $loader));
-        $engine->render('{{#NOTVALID}}XXX{{/NOTVALID}}', array());
+        //date_default_timezone_set('GMT');
+        
+        //FIRST UP: some awesome helpers!!
+        
+        //translations
+        $translations = array(
+            'hello' => 'bonjour',
+            'my name is %s' => 'mon nom est %s',
+            'how are your %s kids and %s' => 'comment sont les enfants de votre %s et %s'
+        );
+        
+        //i18n
+        $engine->registerHelper('_', function($key) use ($translations) {
+            $args = func_get_args();
+            $key = array_shift($args);
+            $options = array_pop($args);
+            
+            //make sure it's a string
+            $key = (string) $key;
+            
+            //by default the translation is the key
+            $translation = $key;
+            
+            //if there is a translation
+            if(isset($translations[$key])) {
+                //translate it
+                $translation = $translations[$key];
+            }
+            
+            //if there are more arguments
+            if(!empty($args)) {
+                //it means the translations was 
+                //something like 'Hello %s'
+                return vsprintf($translation, $args);
+            }
+            
+            //just return what we got
+            return $translation;
+        });
+        
+        //create a better if helper
+        $engine->registerHelper('when', function($value1, $operator, $value2, $options) {
+            $valid = false;
+            //the amazing reverse switch!
+            switch (true) {
+                case $operator == 'eq' && $value1 == $value2:
+                case $operator == '==' && $value1 == $value2:
+                case $operator == 'req' && $value1 === $value2:
+                case $operator == '===' && $value1 === $value2:
+                case $operator == 'neq' && $value1 != $value2:
+                case $operator == '!=' && $value1 != $value2:
+                case $operator == 'rneq' && $value1 !== $value2:
+                case $operator == '!==' && $value1 !== $value2:
+                case $operator == 'lt' && $value1 < $value2:
+                case $operator == '<' && $value1 < $value2:
+                case $operator == 'lte' && $value1 <= $value2:
+                case $operator == '<=' && $value1 <= $value2:
+                case $operator == 'gt' && $value1 > $value2:
+                case $operator == '>' && $value1 > $value2:
+                case $operator == 'gte' && $value1 >= $value2:
+                case $operator == '>=' && $value1 >= $value2:
+                case $operator == 'and' && $value1 && $value2: 
+                case $operator == '&&' && ($value1 && $value2):
+                case $operator == 'or' && ($value1 || $value2):
+                case $operator == '||' && ($value1 || $value2):
+                    $valid = true;
+                    break;
+            }
+            
+            if($valid) {
+                return $options['fn']();
+            }
+        
+            return $options['inverse']();
+        });
+        
+        //a loop helper
+        $engine->registerHelper('loop', function($object, $options) {
+            //expected for subtemplates of this block to use
+            //  {{value.profile_name}} vs {{profile_name}}
+            //  {{key}} vs {{@index}}
+            
+            $i = 0;
+            $buffer = array();
+            $total = count($object);
+            
+            //loop through the object
+            foreach($object as $key => $value) {
+                //call the sub template and 
+                //add it to the buffer
+                $buffer[] = $options['fn'](array(
+                    'key'    => $key,
+                    'value'    => $value,
+                    'last'    => ++$i === $total
+                ));
+            }
+            
+            return implode('', $buffer);
+        });
+        
+        //array in
+        $engine->registerHelper('in', function(array $array, $key, $options) {
+            if(in_array($key, $array)) {
+                return $options['fn']();
+            }
+
+            return $options['inverse']();
+        });
+        
+        //converts date formats to other formats
+        $engine->registerHelper('date', function($time, $format, $options) {
+            return date($format, strtotime($time));
+        });
+        
+        //nesting helpers, these don't really help anyone :)
+        $engine->registerHelper('nested1', function($test1, $test2, $options) {
+            return $options['fn'](array(
+                'test4' => $test1,
+                'test5' => 'This is Test 5'
+            ));
+        });
+        
+        $engine->registerHelper('nested2', function($options) {
+            return $options['fn'](array('test6' => 'This is Test 6'));
+        });
+        
+        //NEXT UP: some practical case studies
+        
+        //case 1 - i18n
+        $variable1 = array();
+        $template1 = "{{_ 'hello'}}, {{_ 'my name is %s' 'Foo'}}! {{_ 'how are your %s kids and %s' 6 'dog'}}?";
+        $expected1 = 'bonjour, mon nom est Foo! comment sont les enfants de votre 6 et dog?';
+        
+        //case 2 - when
+        $variable2 = array('gender' => 'female', 'foo' => 'bar');
+        $template2 = "Hello {{#when gender '===' 'male'}}sir{{else}}maam{{/when}} {{foo}}";
+        $expected2 = 'Hello maam bar';
+        
+        //case 3 - when else
+        $variable3 = array('gender' => 'male');
+        $template3 = "Hello {{#when gender '===' 'male'}}sir{{else}}maam{{/when}}";
+        $expected3 = 'Hello sir';
+        
+        //case 4 - loop
+        $variable4 = array(
+            'rows' => array(
+                array(
+                    'profile_name' => 'Jane Doe',
+                    'profile_created' => '2014-04-04 00:00:00'
+                ),
+                array(
+                    'profile_name' => 'John Doe',
+                    'profile_created' => '2015-01-21 00:00:00'
+                )
+            )
+        );
+        $template4 = "{{#loop rows}}<li>{{value.profile_name}} - {{date value.profile_created 'M d'}}</li>{{/loop}}";
+        $expected4 = '<li>Jane Doe - Apr 04</li><li>John Doe - Jan 21</li>';
+        
+        //case 5 - array in
+        $variable5 = $variable4;
+        $variable5['me'] = 'Jack Doe';
+        $variable5['admins'] = array('Jane Doe', 'John Doe');
+        $template5 = "{{#in admins me}}<ul>".$template4."</ul>{{else}}No Access{{/in}}{{suffix}}";
+        $expected5 = 'No Access';
+        
+        //case 6 - array in else
+        $variable6 = $variable5;
+        $variable6['me'] = 'Jane Doe';
+        $variable6['suffix'] = 'qux';
+        $template6 = $template5;
+        $expected6 = '<ul><li>Jane Doe - Apr 04</li><li>John Doe - Jan 21</li></ul>qux';
+        
+        //case 7 - nested templates and parent-grand variables
+        $variable7 = array('test' => 'Hello World');
+        $template7 = '{{#nested1 test "test2"}}  '
+            .'In 1: {{test4}} {{#nested1 ../test \'test3\'}} '
+            .'In 2: {{test5}}{{#nested2}}  '
+            .'In 3: {{test6}}  {{../../../test}}{{/nested2}}{{/nested1}}{{/nested1}}';
+        $expected7 = '  In 1: Hello World  In 2: This is Test 5  In 3: This is Test 6  Hello World';
+        
+        //case 8 - when inside an each
+        $variable8 = array('data' => array(0, 1, 2, 3),'finish' => 'ok');
+        $template8 = '{{#each data}}{{#when this ">" "0"}}{{this}}{{/when}}{{/each}} {{finish}}';
+        $expected8 = '123 ok';
+        
+        //case 9 - when inside an each
+        $variable9 = array('data' => array(),'finish' => 'ok');
+        $template9 = '{{#each data}}{{#when this ">" "0"}}{{this}}{{/when}}{{else}}foo{{/each}} {{finish}}';
+        $expected9 = 'foo ok';
+        
+        //LAST UP: the actual testing
+        
+        $this->assertEquals($expected1, $engine->render($template1, $variable1));
+        $this->assertEquals($expected2, $engine->render($template2, $variable2));
+        $this->assertEquals($expected3, $engine->render($template3, $variable3));
+        $this->assertEquals($expected4, $engine->render($template4, $variable4));
+        $this->assertEquals($expected5, $engine->render($template5, $variable5));
+        $this->assertEquals($expected6, $engine->render($template6, $variable6));
+        $this->assertEquals($expected7, $engine->render($template7, $variable7));
+        $this->assertEquals($expected8, $engine->render($template8, $variable8));
+        $this->assertEquals($expected9, $engine->render($template9, $variable9));
     }
 
     public function testInvalidHelper()
@@ -464,16 +684,23 @@ class HandlebarsTest extends \PHPUnit_Framework_TestCase
         $engine = new \Handlebars\Handlebars(array('loader' => $loader));
         $this->assertEquals('yes', $engine->render('{{#x}}yes{{/x}}', array('x' => true)));
         $this->assertEquals('', $engine->render('{{#x}}yes{{/x}}', array('x' => false)));
+        $this->assertEquals('', $engine->render('{{#NOTVALID}}XXX{{/NOTVALID}}', array()));
         $this->assertEquals('yes', $engine->render('{{^x}}yes{{/x}}', array('x' => false)));
         $this->assertEquals('', $engine->render('{{^x}}yes{{/x}}', array('x' => true)));
         $this->assertEquals('1234', $engine->render('{{#x}}{{this}}{{/x}}', array('x' => array(1, 2, 3, 4))));
         $this->assertEquals('012', $engine->render('{{#x}}{{@index}}{{/x}}', array('x' => array('a', 'b', 'c'))));
-        $this->assertEquals('abc', $engine->render('{{#x}}{{@key}}{{/x}}', array('x' => array('a' => 1, 'b' => 2, 'c' => 3))));
-        $this->assertEquals('the_only_key', $engine->render('{{#x}}{{@key}}{{/x}}', array('x' => array('the_only_key' => 1))));
+        $this->assertEquals('123', $engine->render('{{#x}}{{a}}{{b}}{{c}}{{/x}}', array('x' => array('a' => 1, 'b' => 2, 'c' => 3))));
+        $this->assertEquals('1', $engine->render('{{#x}}{{the_only_key}}{{/x}}', array('x' => array('the_only_key' => 1))));
         $std = new stdClass();
         $std->value = 1;
+        $std->other = 4;
         $this->assertEquals('1', $engine->render('{{#x}}{{value}}{{/x}}', array('x' => $std)));
         $this->assertEquals('1', $engine->render('{{{x}}}', array('x' => 1)));
+        $this->assertEquals('1 2', $engine->render('{{#x}}{{value}} {{parent}}{{/x}}', array('x' => $std, 'parent' => 2)));
+
+        $y = new stdClass();
+        $y->value = 2;
+        $this->assertEquals('2 1 3 4', $engine->render('{{#x}}{{#y}}{{value}} {{x.value}} {{from_root}} {{other}}{{/y}}{{/x}}', array('x' => $std, 'y' => $y, 'from_root' => 3)));
     }
 
     /**
@@ -560,12 +787,26 @@ class HandlebarsTest extends \PHPUnit_Framework_TestCase
     /**
      * test String class
      */
-    public function testStringClass()
+    public function testStringWrapperClass()
     {
-        $string = new \Handlebars\String('test');
+        $string = new \Handlebars\StringWrapper('test');
         $this->assertEquals('test', $string->getString());
         $string->setString('new');
         $this->assertEquals('new', $string->getString());
+    }
+
+    /**
+     * test SafeString class
+     */
+    public function testSafeStringClass()
+    {
+        $loader = new \Handlebars\Loader\StringLoader();
+        $helpers = new \Handlebars\Helpers();
+        $engine = new \Handlebars\Handlebars(array('loader' => $loader, 'helpers' => $helpers));
+
+        $this->assertEquals('<strong>Test</strong>', $engine->render('{{string}}', array(
+            'string' => new \Handlebars\SafeString('<strong>Test</strong>')
+        )));
     }
 
     /**
@@ -700,7 +941,11 @@ EOM;
     public function testPartial()
     {
         $loader = new \Handlebars\Loader\StringLoader();
-        $partialLoader = new \Handlebars\Loader\ArrayLoader(array('test' => '{{key}}', 'bar' => 'its foo'));
+        $partialLoader = new \Handlebars\Loader\ArrayLoader(array(
+            'test' => '{{key}}',
+            'bar' => 'its foo',
+            'presetVariables' => '{{myVar}}',
+        ));
         $partialAliasses = array('foo' => 'bar');
         $engine = new \Handlebars\Handlebars(
             array(
@@ -710,6 +955,11 @@ EOM;
             )
         );
 
+        $this->assertEquals('foobar', $engine->render("{{>presetVariables myVar='foobar'}}", array()));
+        $this->assertEquals('foobar=barbaz', $engine->render("{{>presetVariables myVar='foobar=barbaz'}}", array()));
+        $this->assertEquals('qux', $engine->render("{{>presetVariables myVar=foo}}", array('foo' => 'qux')));
+        $this->assertEquals('qux', $engine->render("{{>presetVariables myVar=foo.bar}}", array('foo' => array('bar' => 'qux'))));
+
         $this->assertEquals('HELLO', $engine->render('{{>test parameter}}', array('parameter' => array('key' => 'HELLO'))));
         $this->assertEquals('its foo', $engine->render('{{>foo}}', array()));
         $engine->registerPartial('foo-again', 'bar');
@@ -718,6 +968,7 @@ EOM;
 
         $this->setExpectedException('RuntimeException');
         $engine->render('{{>foo-again}}', array());
+
     }
 
     /**
@@ -741,6 +992,9 @@ EOM;
         $this->assertEquals('var-x', $engine->render('{{#with var.y}}{{../var.x}}{{/with}}', array('var' => $var)));
         // Reference array as string
         $this->assertEquals('Array', $engine->render('{{var}}', array('var' => array('test'))));
+
+        // Test class with __toString method
+        $this->assertEquals('test', $engine->render('{{var}}', array('var' => new TestClassWithToStringMethod())));
 
         $obj = new DateTime();
         $time = $obj->getTimestamp();
@@ -1076,7 +1330,7 @@ EOM;
 
     public function testString()
     {
-        $string = new \Handlebars\String("Hello World");
+        $string = new \Handlebars\StringWrapper("Hello World");
         $this->assertEquals((string)$string, "Hello World");
     }
 
@@ -1154,16 +1408,34 @@ EOM;
         $this->assertEquals('A-B', $engine->render('{{concat (concat a "-") b}}', array('a' => 'A', 'b' => 'B', 'A-' => '!')));
     }
 
+    public function ifUnlessDepthDoesntChangeProvider()
+    {
+        return array(array(
+            '{{#with b}}{{#if this}}{{../a}}{{/if}}{{/with}}',
+            array('a' => 'good', 'b' => 'stump'),
+            'good',
+        ), array(
+            '{{#with b}}{{#unless false}}{{../a}}{{/unless}}{{/with}}',
+            array('a' => 'good', 'b' => 'stump'),
+            'good',
+        ), array(
+            '{{#with foo}}{{#if goodbye}}GOODBYE cruel {{../world}}!{{/if}}{{/with}}',
+            array('foo' => array('goodbye' => true), 'world' => 'world'),
+            'GOODBYE cruel world!',
+        ));
+    }
+
     /**
-     * Test if and unless adding an extra layer when accessing parent
+     * Test if and unless do not add an extra layer when accessing parent
+     *
+     * @dataProvider ifUnlessDepthDoesntChangeProvider
      */
-    public function testIfUnlessExtraLayer()
+    public function testIfUnlessDepthDoesntChange($template, $data, $expected)
     {
         $loader = new \Handlebars\Loader\StringLoader();
         $engine = new \Handlebars\Handlebars(array('loader' => $loader));
 
-        $this->assertEquals('good', $engine->render('{{#with b}}{{#if this}}{{../../a}}{{/if}}{{/with}}', array('a' => 'good', 'b' => 'stump')));
-        $this->assertEquals('good', $engine->render('{{#with b}}{{#unless false}}{{../../a}}{{/unless}}{{/with}}', array('a' => 'good', 'b' => 'stump')));
+        $this->assertEquals($expected, $engine->render($template, $data));
     }
 
     /**
@@ -1253,6 +1525,12 @@ EOM;
         $this->assertEquals($res, $results);
     }
 
+}
+
+class TestClassWithToStringMethod {
+    public function __toString() {
+        return 'test';
+    }
 }
 
 /**
